@@ -2,11 +2,13 @@ import os
 import sys
 import threading
 import time
+import csv
+from datetime import datetime
 from PyQt5.QtWidgets import (
     QMainWindow, QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QListWidget, QProgressBar, QTabWidget, QFileDialog,
     QMessageBox, QGroupBox, QGridLayout, QCheckBox, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QHeaderView, QAction, QMenu, QStatusBar
+    QAbstractItemView, QHeaderView, QAction, QMenu, QStatusBar, QInputDialog
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
@@ -18,6 +20,7 @@ from progress_manager import ProgressManager
 from config import SERVICE_PORTS, WORDLISTS_DIR
 from error_handler import ErrorHandler
 from utils import find_exe_in_dir, get_creation_flags
+from settings_tab import SettingsTab
 
 class NetworkScannerGUI(QMainWindow):
     scan_update_signal = pyqtSignal(list)
@@ -29,6 +32,8 @@ class NetworkScannerGUI(QMainWindow):
         self.setWindowTitle("Network Scanner & Brute-force Tool")
         self.setGeometry(100, 100, 1200, 800)
         self.is_scanning = False
+        self.scan_paused = False
+        self.brute_paused = False
         self.scan_results = []
         self.scan_progress_manager = None
         self.brute_executor = None
@@ -53,6 +58,10 @@ class NetworkScannerGUI(QMainWindow):
         # Dashboard tab
         self.dashboard_tab = DashboardTab(self)
         self.tab_widget.addTab(self.dashboard_tab, "Dashboard")
+
+        # Settings tab
+        self.settings_tab = SettingsTab()
+        self.tab_widget.addTab(self.settings_tab, "Settings")
 
         # Status bar
         self.status_bar = QStatusBar()
@@ -121,6 +130,11 @@ class NetworkScannerGUI(QMainWindow):
         self.scan_button = QPushButton("Start Scan")
         self.scan_button.clicked.connect(self.toggle_scan)
         scan_control_layout.addWidget(self.scan_button)
+        
+        self.pause_button = QPushButton("Pause Scan")
+        self.pause_button.clicked.connect(self.toggle_pause_scan)
+        self.pause_button.setEnabled(False)
+        scan_control_layout.addWidget(self.pause_button)
 
         self.stop_button = QPushButton("Stop Scan")
         self.stop_button.clicked.connect(self.stop_scan)
@@ -146,6 +160,16 @@ class NetworkScannerGUI(QMainWindow):
         self.brute_button = QPushButton("Brute-force Selected Targets")
         self.brute_button.clicked.connect(self.start_brute_force)
         brute_control_layout.addWidget(self.brute_button)
+        
+        self.pause_brute_button = QPushButton("Pause Brute")
+        self.pause_brute_button.clicked.connect(self.toggle_pause_brute)
+        self.pause_brute_button.setEnabled(False)
+        brute_control_layout.addWidget(self.pause_brute_button)
+        
+        self.stop_brute_button = QPushButton("Stop Brute")
+        self.stop_brute_button.clicked.connect(self.stop_brute_force)
+        self.stop_brute_button.setEnabled(False)
+        brute_control_layout.addWidget(self.stop_brute_button)
 
         result_layout.addLayout(brute_control_layout)
         result_group.setLayout(result_layout)
@@ -179,6 +203,32 @@ class NetworkScannerGUI(QMainWindow):
             self.stop_scan()
         else:
             self.start_scan()
+            
+    def toggle_pause_scan(self):
+        self.scan_paused = not self.scan_paused
+        if self.scan_paused:
+            self.pause_button.setText("Resume Scan")
+            self.log("Info", "Scan paused")
+        else:
+            self.pause_button.setText("Pause Scan")
+            self.log("Info", "Scan resumed")
+            
+    def toggle_pause_brute(self):
+        self.brute_paused = not self.brute_paused
+        if self.brute_paused:
+            self.pause_brute_button.setText("Resume Brute")
+            self.log("Info", "Brute-force paused")
+        else:
+            self.pause_brute_button.setText("Pause Brute")
+            self.log("Info", "Brute-force resumed")
+
+    def stop_brute_force(self):
+        if self.brute_executor:
+            self.brute_executor.stop()
+            self.brute_button.setEnabled(True)
+            self.pause_brute_button.setEnabled(False)
+            self.stop_brute_button.setEnabled(False)
+            self.log("Info", "Brute-force stopped by user")
 
     def on_scan_started(self):
         self.dashboard_tab.add_activity("System", 0, "Scan started")
@@ -217,7 +267,9 @@ class NetworkScannerGUI(QMainWindow):
         self.log("Info", f"Starting scan for {len(all_targets)} targets...")
         self.on_scan_started()
         self.is_scanning = True
+        self.scan_paused = False
         self.scan_button.setText("Stop Scan")
+        self.pause_button.setEnabled(True)
         self.stop_button.setEnabled(True)
         self.result_list.clear()
         self.scan_results = []
@@ -253,6 +305,11 @@ class NetworkScannerGUI(QMainWindow):
         for target in targets:
             if not self.is_scanning:
                 break
+                
+            # Wait if paused
+            while self.scan_paused and self.is_scanning:
+                time.sleep(0.5)
+                
             try:
                 results = scanner.scan_network(target, port, service, auto_brute)
                 if results:
@@ -308,16 +365,48 @@ class NetworkScannerGUI(QMainWindow):
     def stop_scan(self):
         self.is_scanning = False
         self.scan_button.setText("Start Scan")
+        self.pause_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.log("Info", "Scan stopped by user")
         if hasattr(self, 'progress_timer') and self.progress_timer.isActive():
             self.progress_timer.stop()
 
+    def save_scan_results(self):
+        # Tạo thư mục kết quả
+        results_dir = "results"
+        os.makedirs(results_dir, exist_ok=True)
+        
+        # Nhóm kết quả theo dịch vụ
+        service_results = {}
+        for ip, port, service in self.scan_results:
+            if service not in service_results:
+                service_results[service] = []
+            service_results[service].append((ip, port))
+        
+        # Lưu từng dịch vụ
+        date_str = datetime.now().strftime("%Y%m%d")
+        for service, results in service_results.items():
+            filename = f"{service}_{date_str}.csv"
+            filepath = os.path.join(results_dir, filename)
+            
+            with open(filepath, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["IP Address", "Port", "Service"])
+                for ip, port in results:
+                    writer.writerow([ip, port, service])
+            
+            self.log("Info", f"Saved {len(results)} {service} results to {filename}")
+
     def on_scan_complete(self):
         self.is_scanning = False
         self.scan_button.setText("Start Scan")
+        self.pause_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.log("Info", "Scan completed successfully")
+        
+        # Lưu kết quả
+        self.save_scan_results()
+        
         if hasattr(self, 'progress_timer') and self.progress_timer.isActive():
             self.progress_timer.stop()
 
@@ -335,32 +424,70 @@ class NetworkScannerGUI(QMainWindow):
         self.brute_executor = ParallelExecutor(max_threads=5, log_function=self.log)
         for item in selected_items:
             ip, port, service = item.data(Qt.UserRole)
-            # Build command based on service
-            cmd = []
-            wordlist_dir = WORDLISTS_DIR
             
-            if service == "SSH":
-                user_file = os.path.join(wordlist_dir, "ssh_users.txt")
-                pass_file = os.path.join(wordlist_dir, "ssh_pass.txt")
-                if os.path.exists(user_file) and os.path.exists(pass_file):
-                    cmd = ["hydra", "-L", user_file, "-P", pass_file, "ssh://" + ip]
-            elif service == "FTP":
-                user_file = os.path.join(wordlist_dir, "ftp_users.txt")
-                pass_file = os.path.join(wordlist_dir, "ftp_pass.txt")
-                if os.path.exists(user_file) and os.path.exists(pass_file):
-                    cmd = ["hydra", "-L", user_file, "-P", pass_file, "ftp://" + ip]
-            elif service == "RDP":
-                user_file = os.path.join(wordlist_dir, "rdp_users.txt")
-                pass_file = os.path.join(wordlist_dir, "rdp_pass.txt")
-                if os.path.exists(user_file) and os.path.exists(pass_file):
-                    cmd = ["hydra", "-L", user_file, "-P", pass_file, "rdp://" + ip]
-            else:
-                self.log("Warning", f"Brute-force not supported for {service}")
+            # Hiển thị dialog chọn công cụ
+            tool, ok = QInputDialog.getItem(
+                self,
+                "Select Brute-force Tool",
+                f"Tool for {service} on {ip}:{port}:",
+                ["Hydra", "Ncrack"],
+                0,
+                False
+            )
+            if not ok:
                 continue
+                
+            # Chọn file username và password
+            user_file, _ = QFileDialog.getOpenFileName(
+                self, 
+                f"Select Username Wordlist for {service}",
+                WORDLISTS_DIR,
+                "Text Files (*.txt);;All Files (*)"
+            )
+            if not user_file:
+                self.log("Warning", f"No username wordlist selected for {ip}:{port}")
+                continue
+                
+            pass_file, _ = QFileDialog.getOpenFileName(
+                self, 
+                f"Select Password Wordlist for {service}",
+                WORDLISTS_DIR,
+                "Text Files (*.txt);;All Files (*)"
+            )
+            if not pass_file:
+                self.log("Warning", f"No password wordlist selected for {ip}:{port}")
+                continue
+                
+            # Build command based on tool and service
+            cmd = []
+            if tool == "Hydra":
+                if service == "SSH":
+                    cmd = ["hydra", "-L", user_file, "-P", pass_file, "ssh://" + ip]
+                elif service == "FTP":
+                    cmd = ["hydra", "-L", user_file, "-P", pass_file, "ftp://" + ip]
+                elif service == "RDP":
+                    cmd = ["hydra", "-L", user_file, "-P", pass_file, "rdp://" + ip]
+                elif service == "HTTP" or service == "HTTPS":
+                    cmd = ["hydra", "-L", user_file, "-P", pass_file, f"http-get://{ip}"]
+                else:
+                    self.log("Warning", f"Brute-force with Hydra not supported for {service}")
+                    continue
+            elif tool == "Ncrack":
+                if service == "SSH":
+                    cmd = ["ncrack", "-U", user_file, "-P", pass_file, f"ssh://{ip}:{port}"]
+                elif service == "FTP":
+                    cmd = ["ncrack", "-U", user_file, "-P", pass_file, f"ftp://{ip}:{port}"]
+                elif service == "RDP":
+                    cmd = ["ncrack", "-U", user_file, "-P", pass_file, f"rdp://{ip}:{port}"]
+                elif service == "HTTP" or service == "HTTPS":
+                    cmd = ["ncrack", "-U", user_file, "-P", pass_file, f"http://{ip}:{port}"]
+                else:
+                    self.log("Warning", f"Brute-force with Ncrack not supported for {service}")
+                    continue
             
             if cmd:  # Only add if command is valid
                 self.brute_executor.add_task(id(item), cmd, service)
-                self.log("Info", f"Added {ip}:{port} ({service}) to brute-force queue")
+                self.log("Info", f"Added {ip}:{port} ({service}) to brute-force queue with {tool}")
 
         if self.brute_executor.task_queue.empty():
             self.log("Warning", "No valid brute-force tasks created")
@@ -370,6 +497,8 @@ class NetworkScannerGUI(QMainWindow):
         self.on_brute_started()
         self.brute_executor.start()
         self.brute_button.setEnabled(False)
+        self.pause_brute_button.setEnabled(True)
+        self.stop_brute_button.setEnabled(True)
         self.dashboard_tab.update_parallel_status(
             self.brute_executor.active_threads, 
             self.brute_executor.task_queue.qsize()
@@ -418,6 +547,8 @@ class NetworkScannerGUI(QMainWindow):
 
     def on_brute_complete(self):
         self.brute_button.setEnabled(True)
+        self.pause_brute_button.setEnabled(False)
+        self.stop_brute_button.setEnabled(False)
         self.status_bar.showMessage("Brute-force completed", 5000)
 
     def log(self, source, message):

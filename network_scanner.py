@@ -78,7 +78,7 @@ class NetworkScanner:
     def scan_single(self, target, port, service, progress):
         """Scan a single target or subnet"""
         try:
-            self.log("Info", f"Scanning: {target}")
+            self.log("Info", f"Scanning: {target} on port(s): {port}")
             
             # Build Nmap command
             cmd = [self.nmap_path, "-n", "-p", port, "--open", target]

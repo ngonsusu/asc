@@ -1,17 +1,9 @@
-from PyQt5.QtGui import QPainter 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox, QTableWidget, 
     QTableWidgetItem, QHeaderView, QProgressBar, QFrame, QGridLayout
 )
 from PyQt5.QtCore import Qt, QDateTime
 from PyQt5.QtGui import QColor, QFont
-
-# Check if QtChart is available
-try:
-    from PyQt5.QtChart import QChart, QChartView, QBarSet, QBarSeries, QBarCategoryAxis
-    QTCHART_AVAILABLE = True
-except ImportError:
-    QTCHART_AVAILABLE = False
 
 class DashboardTab(QWidget):
     def __init__(self, parent=None):
@@ -113,35 +105,6 @@ class DashboardTab(QWidget):
         h_layout = QHBoxLayout()
         h_layout.setSpacing(15)
         
-        # Service distribution chart
-        chart_frame = QFrame()
-        chart_frame.setFrameShape(QFrame.StyledPanel)
-        chart_frame.setStyleSheet("background-color: #ffffff; border-radius: 8px; padding: 10px;")
-        chart_layout = QVBoxLayout(chart_frame)
-        
-        chart_title = QLabel("Open Service Distribution")
-        chart_title.setFont(title_font)
-        chart_layout.addWidget(chart_title)
-        
-        if QTCHART_AVAILABLE:
-            self.chart = QChart()
-            self.chart.setTitle("")
-            self.chart.setAnimationOptions(QChart.SeriesAnimations)
-            self.chart.legend().setVisible(True)
-            self.chart.legend().setAlignment(Qt.AlignBottom)
-            
-            self.chart_view.setRenderHint(QPainter.Antialiasing)  # Sử dụng QPainter thay vì QChartView
-            self.chart_view.setRenderHint(QChartView.Antialiasing)
-            self.chart_view.setMinimumHeight(300)
-            
-            chart_layout.addWidget(self.chart_view)
-        else:
-            warning_label = QLabel("Charts unavailable. Please install PyQtChart.")
-            warning_label.setStyleSheet("color: red; font-style: italic;")
-            chart_layout.addWidget(warning_label)
-        
-        h_layout.addWidget(chart_frame, 1)
-        
         # Recent activity table
         activity_frame = QFrame()
         activity_frame.setFrameShape(QFrame.StyledPanel)
@@ -214,47 +177,8 @@ class DashboardTab(QWidget):
             self.current_target_label.setText("Scanning: None")
     
     def update_chart(self, service_distribution):
-        if not QTCHART_AVAILABLE or not hasattr(self, 'chart'):
-            return
-            
-        self.chart.removeAllSeries()
-        
-        if not service_distribution:
-            return
-        
-        bar_set = QBarSet("Count")
-        categories = []
-        colors = [
-            QColor(70, 130, 180),   # Steel blue
-            QColor(46, 204, 113),    # Emerald green
-            QColor(241, 196, 15),    # Sunflower yellow
-            QColor(231, 76, 60),     # Alizarin red
-            QColor(155, 89, 182),    # Amethyst purple
-            QColor(26, 188, 156)     # Turquoise
-        ]
-        
-        # Sort services by count
-        sorted_services = sorted(service_distribution.items(), key=lambda x: x[1], reverse=True)
-        
-        for i, (service, count) in enumerate(sorted_services):
-            bar_set.append(count)
-            categories.append(service)
-            if i < len(colors):
-                bar_set.setColor(colors[i])
-        
-        bar_series = QBarSeries()
-        bar_series.append(bar_set)
-        bar_series.setLabelsVisible(True)
-        bar_series.setLabelsPosition(QBarSeries.LabelsCenter)
-        
-        self.chart.addSeries(bar_series)
-        
-        axis_x = QBarCategoryAxis()
-        axis_x.append(categories)
-        self.chart.createDefaultAxes()
-        self.chart.setAxisX(axis_x, bar_series)
-        max_value = max(service_distribution.values()) * 1.2 if service_distribution else 1
-        self.chart.axisY().setRange(0, max_value)
+        # Do nothing, chart removed
+        pass
     
     def add_activity(self, ip, port, action):
         try:
