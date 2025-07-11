@@ -26,6 +26,7 @@ class NetworkScannerGUI(QMainWindow):
     scan_update_signal = pyqtSignal(list)
     scan_complete_signal = pyqtSignal()
     brute_complete_signal = pyqtSignal()
+    log_signal = pyqtSignal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -44,6 +45,7 @@ class NetworkScannerGUI(QMainWindow):
         self.scan_update_signal.connect(self.update_result_list)
         self.scan_complete_signal.connect(self.on_scan_complete)
         self.brute_complete_signal.connect(self.on_brute_complete)
+        self.log_signal.connect(self._append_log)
 
     def init_ui(self):
         # Create tab widget
@@ -552,6 +554,9 @@ class NetworkScannerGUI(QMainWindow):
         self.status_bar.showMessage("Brute-force completed", 5000)
 
     def log(self, source, message):
+        self.log_signal.emit(source, message)
+
+    def _append_log(self, source, message):
         try:
             timestamp = time.strftime("%H:%M:%S")
             row_position = self.log_area.rowCount()
@@ -563,7 +568,6 @@ class NetworkScannerGUI(QMainWindow):
 
             # Also update dashboard activity for important events
             if "success" in message.lower() or "error" in message.lower() or "warning" in message.lower():
-                # Extract IP if possible
                 ip = "System"
                 if "://" in message:
                     parts = message.split("://")
